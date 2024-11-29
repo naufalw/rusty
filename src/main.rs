@@ -5,7 +5,7 @@ use std::{
     time::Duration,
 };
 
-use futures::{SinkExt,TryStreamExt};
+use futures::{SinkExt, TryStreamExt};
 use log::{debug, error, info};
 use tokio::{net::TcpListener, sync::oneshot, time::sleep};
 use tokio_tungstenite::{accept_async, tungstenite::Message};
@@ -16,19 +16,19 @@ async fn main() {
 
     let mock_ws = Arc::new(MockWS::new("127.0.0.1:8080".to_string()));
 
-    mock_ws.hawk();
+    mock_ws.start();
 
     info!("Started");
 
     sleep(Duration::from_secs(10)).await;
 
     mock_ws.stop();
-
-    let mock_ws = Arc::new(MockWS::new("127.0.0.1:8080".to_string()));
+    info!("Stopped");
 
     sleep(Duration::from_secs(10)).await;
 
-    mock_ws.hawk();
+    mock_ws.start();
+    info!("Starting agian");
 
     sleep(Duration::from_secs(10)).await;
 }
@@ -52,12 +52,30 @@ impl MockWS {
         }
     }
 
-    fn hawk(self: &Arc<Self>) {
+    fn start(self: &Arc<Self>) {
+        self.stop();
+
         let self_clone = self.clone();
-        tokio::spawn(async move { self_clone.start().await });
+
+        self_clone.reset();
+
+        tokio::spawn(async move { self_clone.websocket().await });
     }
 
-    async fn start(&self) -> io::Result<()> {
+    fn reset(&self) {
+        let (sender, receiver) = oneshot::channel();
+
+        // Reset the sender
+        *self.sender.lock().unwrap() = Some(sender);
+
+        // Reset the receiver
+        *self.receiver.lock().unwrap() = Some(receiver);
+
+        // Clear connection senders
+        self.connection_senders.lock().unwrap().clear();
+    }
+
+    async fn websocket(&self) -> io::Result<()> {
         let receiver = self
             .receiver
             .lock()
